@@ -2,6 +2,8 @@
 
 Utilitário de barra de menus para ajustar volume, mute e saída de áudio por aplicação no macOS 26 ou superior.
 
+Licenciado sob a [Licença MIT](LICENSE).
+
 ## Estado do protótipo
 
 O app descobre processos com saída de áudio e usa Core Audio process taps para capturar o som de um bundle identifier. Um `AVAudioEngine` local aplica o ganho e reproduz o fluxo no dispositivo selecionado. Esse caminho usa APIs públicas e não simula controles. O macOS solicita permissão de gravação de áudio do sistema na primeira captura.

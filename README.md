@@ -4,6 +4,8 @@ A native macOS menu bar utility for controlling each application's output volume
 
 Português: [README.pt-BR.md](README.pt-BR.md)
 
+Licensed under the [MIT License](LICENSE).
+
 ## Prototype status
 
 The app discovers processes that are producing audio and uses Core Audio process taps to capture output for a bundle identifier. A local `AVAudioEngine` applies gain and sends the captured stream to the selected device. This uses public APIs rather than simulated per-app controls. macOS asks for system audio recording permission when capture starts.
