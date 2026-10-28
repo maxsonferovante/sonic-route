@@ -8,9 +8,20 @@ Licensed under the [MIT License](LICENSE).
 
 ## Prototype status
 
-The app discovers processes that are producing audio and uses their Core Audio process object IDs to create a process tap. A Core Audio I/O proc reads the private aggregate device into a bounded lock-free ring buffer; an `AVAudioSourceNode` feeds the output engine, where a mixer applies gain and routes the stream to the selected device. This uses public APIs rather than simulated per-app controls and does not open the microphone input node. macOS asks for system audio recording permission when capture starts.
+The app discovers processes that are producing audio and uses their Core Audio process object IDs to create a process tap. A Core Audio I/O proc reads the private aggregate device into a bounded lock-free ring buffer; an `AVAudioSourceNode` feeds the output engine, where a mixer applies gain and routes the stream to the selected device. This uses public APIs rather than simulated per-app controls and does not open the microphone input node. macOS asks for system audio recording permission when capture starts. Audio helpers are grouped under their host app when they are nested in its bundle or use the conventional `.helper` bundle-ID suffix, so browser audio is identified as the browser rather than by the media site.
 
 On the validation Mac, Spotify was discovered and Core Audio created its private tap and aggregate device after system audio recording was authorized. Audible output and latency still need a listening check, and FaceTime routing needs a live call test.
+
+## Demo
+
+Screenshots captured from the running macOS app:
+
+<table>
+  <tr>
+    <td align="center"><strong>Per-app audio controls</strong><br><img src="docs/screenshots/menu-bar-panel.png" alt="Sonic Route panel showing separate Microsoft Edge and Spotify controls" width="320"></td>
+    <td align="center"><strong>Settings</strong><br><img src="docs/screenshots/settings.png" alt="Sonic Route settings panel" width="320"></td>
+  </tr>
+</table>
 
 ## Requirements
 
@@ -57,7 +68,7 @@ In Xcode, select the **SonicRoute** scheme and choose **Product → Test**.
 - **MenuBarViewModel** coordinates application rows, preferences, outputs, and periodic refreshes.
 - **AudioDeviceServicing** enumerates output devices and identifies the system default.
 - **AudioSessionServicing** discovers active audio processes and controls sessions by bundle identifier.
-- **CoreAudioSessionService** creates a private process tap for an app's active Core Audio process object IDs, reads it through an aggregate-device I/O proc, and routes it through an `AVAudioSourceNode` and `AVAudioEngine` to the selected device. It refreshes the tap target if those process objects change.
+- **CoreAudioSessionService** resolves nested helper processes and conventional `.helper` bundle IDs to their host app when possible; other helpers can still appear under their own process identity. It creates a private process tap for an app's active Core Audio process object IDs, reads it through an aggregate-device I/O proc, and routes it through an `AVAudioSourceNode` and `AVAudioEngine` to the selected device. It refreshes the tap target if those process objects change.
 - **AppAudioPreferenceStore** persists volume, mute, and output choice by bundle identifier.
 - Service protocols make rules and control state testable without physical audio hardware.
 

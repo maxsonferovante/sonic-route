@@ -6,9 +6,20 @@ Licenciado sob a [Licença MIT](LICENSE).
 
 ## Estado do protótipo
 
-O app descobre processos com saída de áudio e usa os identificadores de objeto de processo do Core Audio para criar um process tap. Um I/O proc do Core Audio lê o aggregate device privado em um ring buffer lock-free limitado; um `AVAudioSourceNode` alimenta o mecanismo de saída, onde um mixer aplica o ganho e encaminha o fluxo ao dispositivo escolhido. Esse caminho usa APIs públicas, não simula controles e não abre a entrada do microfone. O macOS solicita permissão de gravação de áudio do sistema na primeira captura.
+O app descobre processos com saída de áudio e usa os identificadores de objeto de processo do Core Audio para criar um process tap. Um I/O proc do Core Audio lê o aggregate device privado em um ring buffer lock-free limitado; um `AVAudioSourceNode` alimenta o mecanismo de saída, onde um mixer aplica o ganho e encaminha o fluxo ao dispositivo escolhido. Esse caminho usa APIs públicas, não simula controles e não abre a entrada do microfone. O macOS solicita permissão de gravação de áudio do sistema na primeira captura. Helpers são agrupados sob o app hospedeiro quando estão aninhados no bundle dele ou usam o sufixo convencional `.helper` no bundle ID, então o áudio do navegador é identificado pelo navegador, sem trocar o nome pelo site de mídia.
 
 No Mac de validação, o Spotify foi descoberto e o Core Audio criou seu tap privado e aggregate device após a autorização de gravação de áudio do sistema. A saída audível e a latência ainda precisam de uma verificação por escuta, e o roteamento do FaceTime precisa ser testado durante uma chamada.
+
+## Demonstração
+
+Capturas de tela feitas com o app macOS em execução:
+
+<table>
+  <tr>
+    <td align="center"><strong>Controles de áudio por app</strong><br><img src="docs/screenshots/menu-bar-panel.png" alt="Painel do Sonic Route com controles separados para Microsoft Edge e Spotify" width="320"></td>
+    <td align="center"><strong>Configurações</strong><br><img src="docs/screenshots/settings.png" alt="Painel de configurações do Sonic Route" width="320"></td>
+  </tr>
+</table>
 
 ## Requisitos
 
@@ -55,7 +66,7 @@ No Xcode, selecione o scheme **SonicRoute** e use **Product → Test**.
 - **MenuBarViewModel**: coordena as linhas, preferências, saídas e atualizações periódicas.
 - **AudioDeviceServicing**: enumera dispositivos de saída e identifica a saída padrão.
 - **AudioSessionServicing**: descobre processos com áudio ativo e controla sessões por bundle identifier.
-- **CoreAudioSessionService**: cria um tap privado para os identificadores de objeto de áudio ativos de cada app, lê o tap por um I/O proc do aggregate device e encaminha o áudio por um `AVAudioSourceNode` e `AVAudioEngine` ao dispositivo escolhido. O alvo é atualizado quando esses objetos de processo mudam.
+- **CoreAudioSessionService**: resolve helpers aninhados e bundle IDs com o sufixo convencional `.helper` para o app hospedeiro quando possível; outros helpers ainda podem aparecer com a própria identidade de processo. Cria um tap privado para os identificadores de objeto de áudio ativos de cada app, lê o tap por um I/O proc do aggregate device e encaminha o áudio por um `AVAudioSourceNode` e `AVAudioEngine` ao dispositivo escolhido. O alvo é atualizado quando esses objetos de processo mudam.
 - **AppAudioPreferenceStore**: persiste volume, mute e saída por bundle identifier.
 - Protocolos de serviço permitem testar estado e regras sem depender de hardware de áudio.
 
