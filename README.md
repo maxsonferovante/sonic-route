@@ -1,65 +1,67 @@
 # Sonic Route
 
-Utilitário de barra de menus para ajustar volume, mute e saída de áudio por aplicação no macOS 26 ou superior.
+A native macOS menu bar utility for controlling each application's output volume, mute state, and audio destination independently. Requires macOS 26 or later.
 
-## Estado do protótipo
+Português: [README.pt-BR.md](README.pt-BR.md)
 
-O app descobre processos com saída de áudio e usa Core Audio process taps para capturar o som de um bundle identifier. Um `AVAudioEngine` local aplica o ganho e reproduz o fluxo no dispositivo selecionado. Esse caminho usa APIs públicas e não simula controles. O macOS solicita permissão de gravação de áudio do sistema na primeira captura.
+## Prototype status
 
-Spotify e FaceTime são alvos de compatibilidade para validação. A execução de chamadas e testes com dispositivos físicos não foi feita neste ambiente; a compatibilidade real depende de validação em um Mac com Xcode, áudio ativo e esses apps em uso.
+The app discovers processes that are producing audio and uses Core Audio process taps to capture output for a bundle identifier. A local `AVAudioEngine` applies gain and sends the captured stream to the selected device. This uses public APIs rather than simulated per-app controls. macOS asks for system audio recording permission when capture starts.
 
-## Requisitos
+Spotify and FaceTime are compatibility targets for live validation. Calls and physical audio devices were not available in this environment, so compatibility still needs validation on a Mac running Xcode with both apps producing audio.
 
-- macOS 26 ou superior
-- Xcode 26 para abrir e executar o projeto `.xcodeproj`
-- Swift 6.0 ou superior para os comandos do Swift Package Manager
+## Requirements
 
-## Executar
+- macOS 26 or later
+- Xcode 26 to open and run `SonicRoute.xcodeproj`
+- Swift 6.0 or later for Swift Package Manager commands
 
-1. Abra `SonicRoute.xcodeproj` no Xcode.
-2. Selecione o scheme **SonicRoute** e execute o app.
-3. Clique no ícone de forma de onda na barra de menus.
-4. Ao controlar um app pela primeira vez, permita a gravação de áudio do sistema em **Ajustes do Sistema → Privacidade e Segurança**.
+## Run
 
-O target é um agente de barra de menus, sem ícone no Dock. Para distribuição direta, selecione uma equipe de assinatura Developer ID no Xcode e siga o fluxo de archive e notarização da Apple. A assinatura e a notarização não são geradas neste projeto.
+1. Open `SonicRoute.xcodeproj` in Xcode.
+2. Select the **SonicRoute** scheme and run the app.
+3. Click the waveform icon in the menu bar.
+4. The first time you control an app, allow system audio recording under **System Settings → Privacy & Security**.
 
-## Testes
+The app runs as a menu bar agent and does not appear in the Dock. For direct distribution, select a Developer ID signing team in Xcode and use Apple's archive and notarization workflow. This repository does not include a signed or notarized build.
 
-Os testes unitários usam Swift Testing e cobrem regras de volume, fallback de saída, filtragem de apps, persistência por bundle identifier e restauração de controles quando um app começa a emitir áudio.
+## Tests
+
+The unit tests use Swift Testing to cover volume rules, output fallback, app filtering, persistence by bundle identifier, and restoring controls when an app starts producing audio.
 
 ```sh
 swift test
 ```
 
-No Xcode, selecione o scheme **SonicRoute** e use **Product → Test**.
+In Xcode, select the **SonicRoute** scheme and choose **Product → Test**.
 
-## Arquitetura
+## Architecture
 
-- **MenuBarPanelView** e **ApplicationRowView**: painel compacto de SwiftUI, controles por app e estados vazios, carregamento e erro.
-- **MenuBarViewModel**: coordena as linhas, preferências, saídas e atualizações periódicas.
-- **AudioDeviceServicing**: enumera dispositivos de saída e identifica a saída padrão.
-- **AudioSessionServicing**: descobre processos com áudio ativo e controla sessões por bundle identifier.
-- **CoreAudioSessionService**: cria um tap privado por app, agrega o tap como entrada e encaminha o áudio pelo `AVAudioEngine` ao dispositivo escolhido.
-- **AppAudioPreferenceStore**: persiste volume, mute e saída por bundle identifier.
-- Protocolos de serviço permitem testar estado e regras sem depender de hardware de áudio.
+- **MenuBarPanelView** and **ApplicationRowView** provide the compact SwiftUI panel, per-app controls, and loading, empty, and error states.
+- **MenuBarViewModel** coordinates application rows, preferences, outputs, and periodic refreshes.
+- **AudioDeviceServicing** enumerates output devices and identifies the system default.
+- **AudioSessionServicing** discovers active audio processes and controls sessions by bundle identifier.
+- **CoreAudioSessionService** creates a private process tap per app, aggregates the tap as an input, and routes it through `AVAudioEngine` to the selected device.
+- **AppAudioPreferenceStore** persists volume, mute, and output choice by bundle identifier.
+- Service protocols make rules and control state testable without physical audio hardware.
 
-O fluxo de áudio fica na memória e não é gravado nem enviado pela rede. O volume é aplicado no mixer local. Ao desconectar a saída escolhida, o app usa a saída padrão do macOS e volta à saída preferida quando ela reaparecer.
+Audio stays in memory and is not recorded or sent over the network. Gain is applied by the local mixer. If a selected output disconnects, the app uses the macOS default and returns to the preferred output when it becomes available again.
 
-## Permissões e limitações conhecidas
+## Permissions and known limitations
 
-- O target declara `NSAudioCaptureUsageDescription`. A primeira leitura de um tap exige consentimento do macOS para gravação de áudio do sistema. Se a permissão for negada ou a sessão não iniciar, o app mostra o erro e mantém a aplicação original sem encaminhamento ativo.
-- O macOS não fornece um setter público de volume ou saída diretamente para o processo de outro app. O protótipo silencia a saída original enquanto o tap é lido e reproduz o fluxo capturado; essa passagem pode adicionar latência.
-- A compatibilidade varia por app, formato de áudio, conteúdo protegido e dispositivo. FaceTime e Spotify precisam ser verificados com áudio real antes de prometer suporte amplo.
-- O app controla áudio de saída. O microfone de chamadas continua sob controle do macOS.
-- Sons do Sistema não aparecem como uma aplicação independente, pois o macOS não documenta uma sessão de processo estável com volume e mute próprios para eles.
-- A primeira versão não instala driver virtual. Taps de Core Audio fazem a captura por processo; um driver HAL separado adicionaria instalação privilegiada sem substituir essa captura.
+- The app declares `NSAudioCaptureUsageDescription`. Reading a process tap requires macOS consent for system audio recording. If consent is denied or a session cannot start, the app reports the error and leaves the original app without active routing.
+- macOS provides no public setter for another app's volume or output device. The prototype mutes the original process while reading its tap and plays the captured stream; this can add latency.
+- Compatibility varies by app, audio format, protected content, and device. Spotify and FaceTime need live testing before broad compatibility can be claimed.
+- The app controls output audio. The macOS system continues to control the call microphone.
+- System Sounds is omitted as an independent application because macOS does not document a stable process session with its own volume and mute controls.
+- The first version does not install a virtual driver. Core Audio taps capture per-process output; a separate HAL driver would add privileged installation and is not required for this capture path.
 
-## Estrutura
+## Project layout
 
 ```text
 Sources/
-  SonicRoute/       # entrada do app e views SwiftUI/AppKit
-  SonicRouteCore/   # modelos, regras, serviços e view model
+  SonicRoute/       # app entry point and SwiftUI/AppKit views
+  SonicRouteCore/   # models, rules, services, and view model
 Tests/
   SonicRouteCoreTests/
 ```
