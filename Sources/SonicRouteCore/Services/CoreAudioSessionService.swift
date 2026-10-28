@@ -3,6 +3,7 @@ import AudioToolbox
 import AVFAudio
 import CoreAudio
 import Foundation
+import Synchronization
 
 @MainActor
 public final class CoreAudioSessionService: AudioSessionServicing {
@@ -12,14 +13,13 @@ public final class CoreAudioSessionService: AudioSessionServicing {
 
     public func discoverApplications(showOnlyActive: Bool) throws -> [RunningAudioApplication] {
         let processes = try AudioHardwareSystem.shared.processes
-        var activeProcesses: [String: [pid_t]] = [:]
+        var activeProcesses: [String: [AudioObjectID]] = [:]
 
         for process in processes {
             do {
                 guard try process.isRunningOutput else { continue }
                 guard let bundleIdentifier = try process.bundleID, !bundleIdentifier.isEmpty else { continue }
-                let pid = try process.pid
-                activeProcesses[bundleIdentifier, default: []].append(pid)
+                activeProcesses[bundleIdentifier, default: []].append(process.id)
             } catch {
                 continue
             }
@@ -40,8 +40,8 @@ public final class CoreAudioSessionService: AudioSessionServicing {
                 withBundleIdentifier: bundleIdentifier
             ).filter { !$0.isTerminated }
             let representative = runningApplications.first
-            let processIDs = Array(Set(activeProcesses[bundleIdentifier] ?? [])).sorted()
-            let isAudioActive = !processIDs.isEmpty
+            let processObjectIDs = Array(Set(activeProcesses[bundleIdentifier] ?? [])).sorted()
+            let isAudioActive = !processObjectIDs.isEmpty
 
             guard AudioControlRules.shouldShow(
                 bundleIdentifier: bundleIdentifier,
@@ -55,7 +55,7 @@ public final class CoreAudioSessionService: AudioSessionServicing {
             return RunningAudioApplication(
                 bundleIdentifier: bundleIdentifier,
                 displayName: representative?.localizedName ?? bundleIdentifier,
-                processIDs: processIDs,
+                processObjectIDs: processObjectIDs,
                 isAudioActive: isAudioActive,
                 icon: representative?.icon
             )
@@ -94,7 +94,9 @@ public final class CoreAudioSessionService: AudioSessionServicing {
             throw AudioServiceError.deviceUnavailable(outputUID)
         }
 
-        if let session = sessions[application.bundleIdentifier], session.outputDeviceUID == outputUID {
+        if let session = sessions[application.bundleIdentifier],
+           session.outputDeviceUID == outputUID,
+           session.processObjectIDs == application.processObjectIDs {
             session.setVolume(AudioControlRules.effectiveGain(for: preference))
             return .controlled
         }
@@ -102,6 +104,7 @@ public final class CoreAudioSessionService: AudioSessionServicing {
         stopControlling(bundleIdentifier: application.bundleIdentifier)
         let session = try RoutedProcessAudioSession.create(
             bundleIdentifier: application.bundleIdentifier,
+            processObjectIDs: application.processObjectIDs,
             outputDevice: outputDevice,
             volume: AudioControlRules.effectiveGain(for: preference)
         )
@@ -124,38 +127,43 @@ public final class CoreAudioSessionService: AudioSessionServicing {
 @MainActor
 private final class RoutedProcessAudioSession {
     let outputDeviceUID: String
+    let processObjectIDs: [AudioObjectID]
 
     private let tap: AudioHardwareTap
     private let aggregateDevice: AudioHardwareAggregateDevice
     private let engine: AVAudioEngine
     private let mixer: AVAudioMixerNode
+    private let inputIOProcID: AudioDeviceIOProcID
     private var isStopped = false
 
     private init(
         outputDeviceUID: String,
+        processObjectIDs: [AudioObjectID],
         tap: AudioHardwareTap,
         aggregateDevice: AudioHardwareAggregateDevice,
         engine: AVAudioEngine,
-        mixer: AVAudioMixerNode
+        mixer: AVAudioMixerNode,
+        inputIOProcID: AudioDeviceIOProcID
     ) {
         self.outputDeviceUID = outputDeviceUID
+        self.processObjectIDs = processObjectIDs
         self.tap = tap
         self.aggregateDevice = aggregateDevice
         self.engine = engine
         self.mixer = mixer
+        self.inputIOProcID = inputIOProcID
     }
 
     static func create(
         bundleIdentifier: String,
+        processObjectIDs: [AudioObjectID],
         outputDevice: AudioHardwareDevice,
         volume: Double
     ) throws -> RoutedProcessAudioSession {
         let system = AudioHardwareSystem.shared
         let outputUID = try outputDevice.uid
-        let tapDescription = CATapDescription()
+        let tapDescription = CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
         tapDescription.name = "Sonic Route — \(bundleIdentifier)"
-        tapDescription.bundleIDs = [bundleIdentifier]
-        tapDescription.isProcessRestoreEnabled = true
         tapDescription.isPrivate = true
         tapDescription.muteBehavior = .mutedWhenTapped
 
@@ -195,29 +203,49 @@ private final class RoutedProcessAudioSession {
             throw AudioServiceError.aggregateDeviceCreationFailed
         }
 
+        let tapFormat: AudioStreamBasicDescription
+        do {
+            tapFormat = try tap.format
+        } catch {
+            try? system.destroyAggregateDevice(aggregateDevice)
+            try? system.destroyProcessTap(tap)
+            throw AudioServiceError.engineStartFailed(error.localizedDescription)
+        }
+        guard
+            tapFormat.mFormatID == kAudioFormatLinearPCM,
+            tapFormat.mFormatFlags & kAudioFormatFlagIsFloat != 0,
+            tapFormat.mBitsPerChannel == 32,
+            tapFormat.mChannelsPerFrame > 0
+        else {
+            try? system.destroyAggregateDevice(aggregateDevice)
+            try? system.destroyProcessTap(tap)
+            throw AudioServiceError.engineStartFailed("O Core Audio retornou um formato de captura não suportado.")
+        }
+
+        let channelCount = AVAudioChannelCount(tapFormat.mChannelsPerFrame)
+        guard let sourceFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: tapFormat.mSampleRate,
+            channels: channelCount,
+            interleaved: false
+        ) else {
+            try? system.destroyAggregateDevice(aggregateDevice)
+            try? system.destroyProcessTap(tap)
+            throw AudioServiceError.engineStartFailed("Não foi possível preparar o formato de áudio capturado.")
+        }
+
+        let ringBuffer = ProcessTapRingBuffer(channelCount: Int(channelCount), capacityFrames: 16_384)
         let engine = AVAudioEngine()
         let mixer = engine.mainMixerNode
+        let sourceNode = AVAudioSourceNode(format: sourceFormat) { _, _, frameCount, outputData in
+            ringBuffer.render(into: outputData, frameCount: Int(frameCount))
+        }
+        var inputIOProcID: AudioDeviceIOProcID?
+        var isInputStarted = false
         do {
-            guard
-                let inputAudioUnit = engine.inputNode.audioUnit,
-                let outputAudioUnit = engine.outputNode.audioUnit
-            else {
+            guard let outputAudioUnit = engine.outputNode.audioUnit else {
                 throw AudioServiceError.engineUnavailable
             }
-
-            var inputDeviceID = aggregateDevice.id
-            let inputStatus = AudioUnitSetProperty(
-                inputAudioUnit,
-                kAudioOutputUnitProperty_CurrentDevice,
-                kAudioUnitScope_Global,
-                0,
-                &inputDeviceID,
-                UInt32(MemoryLayout<AudioObjectID>.size)
-            )
-            guard inputStatus == noErr else {
-                throw AudioServiceError.engineStartFailed("Erro ao conectar a captura (\(inputStatus)).")
-            }
-
             var outputDeviceID = outputDevice.id
             let outputStatus = AudioUnitSetProperty(
                 outputAudioUnit,
@@ -232,11 +260,36 @@ private final class RoutedProcessAudioSession {
             }
 
             mixer.outputVolume = Float(AudioControlRules.normalizedVolume(volume))
-            engine.connect(engine.inputNode, to: mixer, format: nil)
+            engine.attach(sourceNode)
+            engine.connect(sourceNode, to: mixer, format: sourceFormat)
             engine.prepare()
+
+            let ioProcStatus = AudioDeviceCreateIOProcIDWithBlock(
+                &inputIOProcID,
+                aggregateDevice.id,
+                nil
+            ) { _, inputData, _, _, _ in
+                ringBuffer.append(from: inputData)
+            }
+            guard ioProcStatus == noErr, let createdIOProcID = inputIOProcID else {
+                throw AudioServiceError.engineStartFailed("Erro ao preparar a captura (\(ioProcStatus)).")
+            }
+
+            let inputStatus = AudioDeviceStart(aggregateDevice.id, createdIOProcID)
+            guard inputStatus == noErr else {
+                throw AudioServiceError.engineStartFailed("Erro ao iniciar a captura (\(inputStatus)).")
+            }
+            isInputStarted = true
+
             try engine.start()
         } catch {
             engine.stop()
+            if let inputIOProcID {
+                if isInputStarted {
+                    _ = AudioDeviceStop(aggregateDevice.id, inputIOProcID)
+                }
+                _ = AudioDeviceDestroyIOProcID(aggregateDevice.id, inputIOProcID)
+            }
             try? system.destroyAggregateDevice(aggregateDevice)
             try? system.destroyProcessTap(tap)
             if let audioError = error as? AudioServiceError {
@@ -247,10 +300,12 @@ private final class RoutedProcessAudioSession {
 
         return RoutedProcessAudioSession(
             outputDeviceUID: outputUID,
+            processObjectIDs: processObjectIDs,
             tap: tap,
             aggregateDevice: aggregateDevice,
             engine: engine,
-            mixer: mixer
+            mixer: mixer,
+            inputIOProcID: inputIOProcID!
         )
     }
 
@@ -262,8 +317,100 @@ private final class RoutedProcessAudioSession {
         guard !isStopped else { return }
         isStopped = true
         engine.stop()
+        _ = AudioDeviceStop(aggregateDevice.id, inputIOProcID)
+        _ = AudioDeviceDestroyIOProcID(aggregateDevice.id, inputIOProcID)
         try? AudioHardwareSystem.shared.destroyAggregateDevice(aggregateDevice)
         try? AudioHardwareSystem.shared.destroyProcessTap(tap)
     }
 
+}
+
+private final class ProcessTapRingBuffer: @unchecked Sendable {
+    private let channelCount: Int
+    private let capacityFrames: Int
+    private let samples: UnsafeMutablePointer<Float>
+    private let readFrame = Atomic<Int>(0)
+    private let writeFrame = Atomic<Int>(0)
+
+    init(channelCount: Int, capacityFrames: Int) {
+        self.channelCount = channelCount
+        self.capacityFrames = capacityFrames
+        samples = .allocate(capacity: channelCount * capacityFrames)
+        samples.initialize(repeating: 0, count: channelCount * capacityFrames)
+    }
+
+    deinit {
+        samples.deallocate()
+    }
+
+    func append(from inputData: UnsafePointer<AudioBufferList>) {
+        let inputBuffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
+        guard !inputBuffers.isEmpty else { return }
+
+        let framesInBuffer: Int
+        if inputBuffers.count == channelCount {
+            framesInBuffer = Int(inputBuffers[0].mDataByteSize) / MemoryLayout<Float>.stride
+        } else if inputBuffers.count == 1 {
+            framesInBuffer = Int(inputBuffers[0].mDataByteSize) / (MemoryLayout<Float>.stride * channelCount)
+        } else {
+            return
+        }
+
+        let currentWriteFrame = writeFrame.load(ordering: .relaxed)
+        let currentReadFrame = readFrame.load(ordering: .acquiring)
+        let freeFrames = max(0, capacityFrames - (currentWriteFrame - currentReadFrame))
+        let framesToWrite = min(framesInBuffer, freeFrames)
+        guard framesToWrite > 0 else { return }
+
+        if inputBuffers.count == channelCount {
+            for channel in 0 ..< channelCount {
+                guard let input = inputBuffers[channel].mData?.assumingMemoryBound(to: Float.self) else {
+                    return
+                }
+                for frame in 0 ..< framesToWrite {
+                    let ringFrame = (currentWriteFrame + frame) % capacityFrames
+                    samples[ringFrame * channelCount + channel] = input[frame]
+                }
+            }
+        } else {
+            guard let input = inputBuffers[0].mData?.assumingMemoryBound(to: Float.self) else { return }
+            for frame in 0 ..< framesToWrite {
+                let ringFrame = (currentWriteFrame + frame) % capacityFrames
+                let inputOffset = frame * channelCount
+                let outputOffset = ringFrame * channelCount
+                for channel in 0 ..< channelCount {
+                    samples[outputOffset + channel] = input[inputOffset + channel]
+                }
+            }
+        }
+
+        writeFrame.store(currentWriteFrame + framesToWrite, ordering: .releasing)
+    }
+
+    func render(into outputData: UnsafeMutablePointer<AudioBufferList>, frameCount: Int) -> OSStatus {
+        let outputBuffers = UnsafeMutableAudioBufferListPointer(outputData)
+        guard outputBuffers.count == channelCount else { return kAudio_ParamError }
+
+        let currentReadFrame = readFrame.load(ordering: .relaxed)
+        let currentWriteFrame = writeFrame.load(ordering: .acquiring)
+        let framesAvailable = max(0, currentWriteFrame - currentReadFrame)
+        let framesToRead = min(frameCount, framesAvailable)
+
+        for channel in 0 ..< channelCount {
+            guard let output = outputBuffers[channel].mData?.assumingMemoryBound(to: Float.self) else {
+                return kAudio_ParamError
+            }
+            for frame in 0 ..< frameCount {
+                if frame < framesToRead {
+                    let ringFrame = (currentReadFrame + frame) % capacityFrames
+                    output[frame] = samples[ringFrame * channelCount + channel]
+                } else {
+                    output[frame] = 0
+                }
+            }
+        }
+
+        readFrame.store(currentReadFrame + framesToRead, ordering: .releasing)
+        return noErr
+    }
 }

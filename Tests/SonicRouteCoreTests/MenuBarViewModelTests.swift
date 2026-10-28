@@ -14,7 +14,7 @@ struct MenuBarViewModelTests {
         let application = RunningAudioApplication(
             bundleIdentifier: "com.example.player",
             displayName: "Example Player",
-            processIDs: [],
+            processObjectIDs: [],
             isAudioActive: false
         )
         let sessions = FakeAudioSessionService(applications: [application])
@@ -47,7 +47,7 @@ struct MenuBarViewModelTests {
             RunningAudioApplication(
                 bundleIdentifier: application.bundleIdentifier,
                 displayName: application.displayName,
-                processIDs: [42],
+                processObjectIDs: [42],
                 isAudioActive: true
             )
         ]

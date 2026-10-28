@@ -1,4 +1,5 @@
 import AppKit
+import CoreAudio
 import Foundation
 
 public struct AudioOutputDevice: Identifiable, Equatable, Sendable {
@@ -40,7 +41,7 @@ public enum AudioOutputDeviceKind: Equatable, Sendable {
 public struct RunningAudioApplication: Identifiable {
     public let bundleIdentifier: String
     public let displayName: String
-    public let processIDs: [pid_t]
+    public let processObjectIDs: [AudioObjectID]
     public let isAudioActive: Bool
     public let icon: NSImage?
 
@@ -49,13 +50,13 @@ public struct RunningAudioApplication: Identifiable {
     public init(
         bundleIdentifier: String,
         displayName: String,
-        processIDs: [pid_t],
+        processObjectIDs: [AudioObjectID] = [],
         isAudioActive: Bool,
         icon: NSImage? = nil
     ) {
         self.bundleIdentifier = bundleIdentifier
         self.displayName = displayName
-        self.processIDs = processIDs
+        self.processObjectIDs = processObjectIDs
         self.isAudioActive = isAudioActive
         self.icon = icon
     }
