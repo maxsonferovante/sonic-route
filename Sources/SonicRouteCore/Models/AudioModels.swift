@@ -62,6 +62,50 @@ public struct RunningAudioApplication: Identifiable {
     }
 }
 
+struct AudioApplicationIdentityCandidate: Equatable {
+    let bundleIdentifier: String
+    let bundlePath: String
+}
+
+enum AudioApplicationIdentityRules {
+    static func hostApplication(
+        processBundleIdentifier: String,
+        processBundleURL: URL?,
+        candidates: [AudioApplicationIdentityCandidate]
+    ) -> AudioApplicationIdentityCandidate? {
+        if let exactMatch = candidates.first(where: { $0.bundleIdentifier == processBundleIdentifier }) {
+            return exactMatch
+        }
+
+        let helperSuffix = ".helper"
+        if processBundleIdentifier.hasSuffix(helperSuffix) {
+            let hostBundleIdentifier = String(processBundleIdentifier.dropLast(helperSuffix.count))
+            if let helperHost = candidates.first(where: { $0.bundleIdentifier == hostBundleIdentifier }) {
+                return helperHost
+            }
+        }
+
+        return enclosingApplication(for: processBundleURL, candidates: candidates)
+    }
+
+    static func enclosingApplication(
+        for processBundleURL: URL?,
+        candidates: [AudioApplicationIdentityCandidate]
+    ) -> AudioApplicationIdentityCandidate? {
+        guard let processBundleURL else { return nil }
+        let processPath = processBundleURL.standardizedFileURL.path
+
+        return candidates
+            .filter { candidate in
+                let candidatePath = URL(fileURLWithPath: candidate.bundlePath).standardizedFileURL.path
+                return processPath == candidatePath || processPath.hasPrefix(candidatePath + "/")
+            }
+            .max { lhs, rhs in
+                lhs.bundlePath.count < rhs.bundlePath.count
+            }
+    }
+}
+
 public struct ApplicationAudioPreference: Codable, Equatable, Sendable {
     public var volume: Double
     public var isMuted: Bool

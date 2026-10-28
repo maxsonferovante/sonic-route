@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import SonicRouteCore
 
@@ -83,5 +84,55 @@ struct AudioControlRulesTests {
             isAudioActive: true,
             showOnlyActive: false
         ) == false)
+    }
+
+    @Test
+    func browserAudioHelpersResolveToTheContainingBrowserApplication() {
+        let browser = AudioApplicationIdentityCandidate(
+            bundleIdentifier: "com.google.Chrome",
+            bundlePath: "/Applications/Google Chrome.app"
+        )
+        let spotify = AudioApplicationIdentityCandidate(
+            bundleIdentifier: "com.spotify.client",
+            bundlePath: "/Applications/Spotify.app"
+        )
+
+        let resolved = AudioApplicationIdentityRules.enclosingApplication(
+            for: URL(fileURLWithPath: "/Applications/Google Chrome.app/Contents/Frameworks/Chrome Helper.app"),
+            candidates: [browser, spotify]
+        )
+
+        #expect(resolved == browser)
+    }
+
+    @Test
+    func browserHelperBundleIdentifiersResolveToTheFriendlyHostAppName() {
+        let edge = AudioApplicationIdentityCandidate(
+            bundleIdentifier: "com.microsoft.edgemac",
+            bundlePath: "/Applications/Microsoft Edge.app"
+        )
+
+        let resolved = AudioApplicationIdentityRules.hostApplication(
+            processBundleIdentifier: "com.microsoft.edgemac.helper",
+            processBundleURL: nil,
+            candidates: [edge]
+        )
+
+        #expect(resolved == edge)
+    }
+
+    @Test
+    func processOutsideARegularAppBundleDoesNotGetMisattributed() {
+        let spotify = AudioApplicationIdentityCandidate(
+            bundleIdentifier: "com.spotify.client",
+            bundlePath: "/Applications/Spotify.app"
+        )
+
+        let resolved = AudioApplicationIdentityRules.enclosingApplication(
+            for: URL(fileURLWithPath: "/System/Library/Frameworks/WebKit.framework/Web Content.app"),
+            candidates: [spotify]
+        )
+
+        #expect(resolved == nil)
     }
 }

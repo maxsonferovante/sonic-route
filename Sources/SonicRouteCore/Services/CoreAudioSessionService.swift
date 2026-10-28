@@ -14,12 +14,41 @@ public final class CoreAudioSessionService: AudioSessionServicing {
     public func discoverApplications(showOnlyActive: Bool) throws -> [RunningAudioApplication] {
         let processes = try AudioHardwareSystem.shared.processes
         var activeProcesses: [String: [AudioObjectID]] = [:]
+        var representatives: [String: NSRunningApplication] = [:]
+        var fallbackRepresentatives: [String: NSRunningApplication] = [:]
+        let runningApplications = NSWorkspace.shared.runningApplications.filter { !$0.isTerminated }
+        var regularApplications: [String: NSRunningApplication] = [:]
+        for application in runningApplications where application.activationPolicy == .regular {
+            guard let bundleIdentifier = application.bundleIdentifier else { continue }
+            regularApplications[bundleIdentifier] = application
+        }
+        let applicationIdentityCandidates = regularApplications.compactMap { entry -> AudioApplicationIdentityCandidate? in
+            guard let bundleURL = entry.value.bundleURL else { return nil }
+            return AudioApplicationIdentityCandidate(
+                bundleIdentifier: entry.key,
+                bundlePath: bundleURL.path
+            )
+        }
 
         for process in processes {
             do {
                 guard try process.isRunningOutput else { continue }
                 guard let bundleIdentifier = try process.bundleID, !bundleIdentifier.isEmpty else { continue }
-                activeProcesses[bundleIdentifier, default: []].append(process.id)
+                let processApplication = NSRunningApplication(processIdentifier: try process.pid)
+                let hostApplication = AudioApplicationIdentityRules.hostApplication(
+                    processBundleIdentifier: bundleIdentifier,
+                    processBundleURL: processApplication?.bundleURL,
+                    candidates: applicationIdentityCandidates
+                )
+                let applicationBundleIdentifier = hostApplication?.bundleIdentifier ?? bundleIdentifier
+                activeProcesses[applicationBundleIdentifier, default: []].append(process.id)
+
+                if let processApplication {
+                    fallbackRepresentatives[bundleIdentifier] = processApplication
+                }
+                if let representative = regularApplications[applicationBundleIdentifier] {
+                    representatives[applicationBundleIdentifier] = representative
+                }
             } catch {
                 continue
             }
@@ -27,19 +56,23 @@ public final class CoreAudioSessionService: AudioSessionServicing {
 
         var bundleIdentifiers = Set(activeProcesses.keys)
         if !showOnlyActive {
-            for runningApplication in NSWorkspace.shared.runningApplications
-            where runningApplication.activationPolicy == .regular {
+            for runningApplication in runningApplications where runningApplication.activationPolicy == .regular {
                 guard let bundleIdentifier = runningApplication.bundleIdentifier else { continue }
-                guard bundleIdentifier != Bundle.main.bundleIdentifier else { continue }
-                bundleIdentifiers.insert(bundleIdentifier)
+                let hostApplication = AudioApplicationIdentityRules.hostApplication(
+                    processBundleIdentifier: bundleIdentifier,
+                    processBundleURL: runningApplication.bundleURL,
+                    candidates: applicationIdentityCandidates
+                )
+                let applicationBundleIdentifier = hostApplication?.bundleIdentifier ?? bundleIdentifier
+                guard applicationBundleIdentifier != Bundle.main.bundleIdentifier else { continue }
+                bundleIdentifiers.insert(applicationBundleIdentifier)
             }
         }
 
         return bundleIdentifiers.compactMap { bundleIdentifier in
-            let runningApplications = NSRunningApplication.runningApplications(
-                withBundleIdentifier: bundleIdentifier
-            ).filter { !$0.isTerminated }
-            let representative = runningApplications.first
+            let representative = representatives[bundleIdentifier]
+                ?? regularApplications[bundleIdentifier]
+                ?? fallbackRepresentatives[bundleIdentifier]
             let processObjectIDs = Array(Set(activeProcesses[bundleIdentifier] ?? [])).sorted()
             let isAudioActive = !processObjectIDs.isEmpty
 
