@@ -210,14 +210,6 @@ public final class MenuBarViewModel: ObservableObject {
         settingsMessage = nil
     }
 
-    public func outputLabel(for preference: ApplicationAudioPreference) -> String {
-        guard let uid = preference.outputDeviceUID else {
-            return outputDevices.first(where: { $0.uid == defaultOutputUID })?.name ?? "Padrão do Sistema"
-        }
-
-        return outputDevices.first(where: { $0.uid == uid })?.name ?? "Indisponível — usando padrão"
-    }
-
     private func updatePreference(
         for bundleIdentifier: String,
         mutation: (inout ApplicationAudioPreference) -> Void

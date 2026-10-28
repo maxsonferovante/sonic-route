@@ -35,7 +35,13 @@ public enum AudioControlRules {
         devices.contains(where: \.isExternal)
     }
 
-    public static func shouldShow(isAudioActive: Bool, showOnlyActive: Bool) -> Bool {
-        !showOnlyActive || isAudioActive
+    public static func shouldShow(
+        bundleIdentifier: String,
+        ownBundleIdentifier: String?,
+        isAudioActive: Bool,
+        showOnlyActive: Bool
+    ) -> Bool {
+        guard bundleIdentifier != ownBundleIdentifier else { return false }
+        return !showOnlyActive || isAudioActive
     }
 }

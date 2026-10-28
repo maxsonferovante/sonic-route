@@ -55,8 +55,33 @@ struct AudioControlRulesTests {
 
     @Test
     func selectedAppsFollowTheAudioActivityFilter() {
-        #expect(AudioControlRules.shouldShow(isAudioActive: false, showOnlyActive: true) == false)
-        #expect(AudioControlRules.shouldShow(isAudioActive: false, showOnlyActive: false) == true)
-        #expect(AudioControlRules.shouldShow(isAudioActive: true, showOnlyActive: true) == true)
+        #expect(AudioControlRules.shouldShow(
+            bundleIdentifier: "com.example.player",
+            ownBundleIdentifier: nil,
+            isAudioActive: false,
+            showOnlyActive: true
+        ) == false)
+        #expect(AudioControlRules.shouldShow(
+            bundleIdentifier: "com.example.player",
+            ownBundleIdentifier: nil,
+            isAudioActive: false,
+            showOnlyActive: false
+        ))
+        #expect(AudioControlRules.shouldShow(
+            bundleIdentifier: "com.example.player",
+            ownBundleIdentifier: nil,
+            isAudioActive: true,
+            showOnlyActive: true
+        ))
+    }
+
+    @Test
+    func neverShowsSonicRouteAsAControllableApplication() {
+        #expect(AudioControlRules.shouldShow(
+            bundleIdentifier: "com.sonicroute.SonicRoute",
+            ownBundleIdentifier: "com.sonicroute.SonicRoute",
+            isAudioActive: true,
+            showOnlyActive: false
+        ) == false)
     }
 }

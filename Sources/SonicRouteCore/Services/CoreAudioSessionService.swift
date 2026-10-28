@@ -44,6 +44,8 @@ public final class CoreAudioSessionService: AudioSessionServicing {
             let isAudioActive = !processIDs.isEmpty
 
             guard AudioControlRules.shouldShow(
+                bundleIdentifier: bundleIdentifier,
+                ownBundleIdentifier: Bundle.main.bundleIdentifier,
                 isAudioActive: isAudioActive,
                 showOnlyActive: showOnlyActive
             ) else {

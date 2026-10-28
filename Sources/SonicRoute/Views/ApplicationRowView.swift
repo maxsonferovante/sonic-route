@@ -58,7 +58,7 @@ struct ApplicationRowView: View {
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                         Button("Abrir Ajustes de Privacidade") {
-                            openAudioCaptureSettings()
+                            AudioCapturePrivacySettings.open()
                         }
                         .font(.system(size: 11, weight: .medium))
                         .buttonStyle(.link)
@@ -133,10 +133,4 @@ struct ApplicationRowView: View {
         return outputDevices.first(where: { $0.uid == uid })?.name ?? "Saída indisponível; usando padrão"
     }
 
-    private func openAudioCaptureSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture") else {
-            return
-        }
-        NSWorkspace.shared.open(url)
-    }
 }

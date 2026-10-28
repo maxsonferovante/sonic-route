@@ -90,6 +90,8 @@ private final class FakeAudioSessionService: AudioSessionServicing {
     func discoverApplications(showOnlyActive: Bool) throws -> [RunningAudioApplication] {
         applications.filter {
             AudioControlRules.shouldShow(
+                bundleIdentifier: $0.bundleIdentifier,
+                ownBundleIdentifier: nil,
                 isAudioActive: $0.isAudioActive,
                 showOnlyActive: showOnlyActive
             )

@@ -49,7 +49,7 @@ struct MenuBarSettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Abrir Ajustes de Privacidade") {
-                    openAudioCaptureSettings()
+                    AudioCapturePrivacySettings.open()
                 }
                 .font(.system(size: 11, weight: .medium))
                 .buttonStyle(.link)
@@ -70,7 +70,10 @@ struct MenuBarSettingsView: View {
         .controlSize(.small)
     }
 
-    private func openAudioCaptureSettings() {
+}
+
+enum AudioCapturePrivacySettings {
+    static func open() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture") else {
             return
         }
